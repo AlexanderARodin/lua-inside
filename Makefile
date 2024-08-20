@@ -1,6 +1,12 @@
 help:
 	@cat Makefile
 
+
+
+test:
+	@cargo test
+
+
 pull:
 	@git pull
 
