@@ -1,31 +1,39 @@
-use mlua::{prelude::*,Variadic,Value};
+use mlua::{prelude::*,Function,Variadic,Value};
 use anyhow::Result;
-use std::cell::RefCell;
 
 
 pub struct LuaInside {
+    #[allow(dead_code)]
     lua: Lua,
-    printer: RefCell<String>,
 }
 
+#[allow(dead_code)]
 impl LuaInside {
-    #[allow(dead_code)]
-    fn new(lua_code: &str) -> Result<Self> {
-        let new_one = Self {
-            lua: Lua::new(),
-            printer: RefCell::new(String::from("oops")),
-        };
-        let printer_clone = new_one.printer.clone();
+    fn new(lua_code: &str, printer: fn(Vec<String>)->() ) -> Result<Self> {
+        // create new mlua instance
+        let lua = Lua::new();
+        
+        {
+            // register alter-PRINT
+            let lua_print = lua.create_function( move |_, lua_args: Variadic<Value>| {
+                lua_printer(&lua_args, printer );
+                Ok(())
+            })?;
+            lua.globals().set("print", lua_print)?;
 
-        let lua_print = new_one.lua.create_function( move |_, lua_args: Variadic<Value>| {
-            invoke_lua_print(&lua_args, printer_clone.clone() );
-            Ok(())
-        })?;
-        new_one.lua.globals().set("print", lua_print)?;
-
-        new_one.lua.load( lua_code ).exec()?;
+            // try to Load and Exec
+            lua.load( lua_code ).exec()?;
+        }
+        
+        // return new configured LuaInside
         println!("--> [+] LuaInside");
-        Ok( new_one )
+        Ok( Self{ lua: lua } )
+    }
+
+    fn invoke_setup<'a>(&'a mut self, args: &Value<'a> ) -> Result<Value<'a>> {
+        let lua_setup: Function = self.lua.globals().get("setup")?;
+        let setup_result = lua_setup.call::<_, Value>(args)?;
+        Ok( setup_result )
     }
 }
 
@@ -36,17 +44,15 @@ impl Drop for LuaInside {
 }
 
 // // // // // // // //
-fn invoke_lua_print(args: &Variadic<Value>, printer: RefCell<String>) {
-    {
-        let mut a = printer.borrow_mut();
-        *a = "simple".to_string() ;
-        println!("TRYYYYYYYYYYY");
-    }
-    print!("LUA:\t");
+fn lua_printer(args: &Variadic<Value>, printer: fn(Vec<String>)->() ) {
+    let mut arg_list: Vec<String> = Vec::new();
     for item in args.iter() {
-//        print!("{} - ", item);
+        arg_list.push( match item.to_string() {
+            Ok(s) => s,
+            Err(_) => String::from("<error>"),
+        });
     }
-    print!("\n");
+    printer( arg_list );
 }
 
 
@@ -57,64 +63,35 @@ fn invoke_lua_print(args: &Variadic<Value>, printer: RefCell<String>) {
 mod tests {
     use super::*;
     use anyhow::anyhow;
+    use std::sync::Mutex;
 
     #[test]
     fn ok_creating() -> Result<()> {
-        let _ = LuaInside::new("-- g o o d  c o d e")?;
+        let _ = LuaInside::new("-- g o o d  c o d e", |_|{} )?;
         Ok(())
     }
 
     #[test]
     fn fail_loading() -> Result<()> {
-        match LuaInside::new("b r o k e n  c o d e") {
+        match LuaInside::new("b r o k e n  c o d e", |_|{} ) {
             Err(_) => return Ok(()),
             Ok(_) => return Err( anyhow!("Must be a Lua syntax Error") ),
         }
     }
 
+    static SS: &str = r#"["simple", "2", "nil", "another"]"#;
+    static NS: Mutex<String> = Mutex::new(String::new());
     #[test]
-    fn printer() -> Result<()> {
-        let ilua = LuaInside::new("print('simple')")?;
-        let s = ilua.printer.borrow();
-        println!("------------ <{}>", s);
-        assert!( *s == "simple" ); 
+    fn logger() -> Result<()> {
+        {
+            let _ilua = LuaInside::new("print('simple', 2, nil, 'another')", 
+                |arg_list|{
+                    let mut ns = NS.lock().unwrap();
+                    *ns = format!( "{:?}", arg_list );
+                } )?;
+        }
+        assert!( SS == *NS.lock().unwrap() ); 
         Ok(())
     }
 }
 
-// // // // // // // //
-
-/*
-
-pub fn main_lua_loop(lua: Lua, main_lua_code: &str) -> mlua::Result<()> {
-    let globals = lua.globals();
-
-    let lua_print = lua.create_function( |_, lua_args: Variadic<Value>| {
-        invoke_lua_print(&lua_args);
-        Ok(())
-    })?;
-    globals.set("print", lua_print)?;
-
-    lua.load( main_lua_code ).exec()?;
-    let setup_params = lua.create_table()?;
-    let call_lua_setup: Function = globals.get("setup")?;
-    let _lua_setup_result = call_lua_setup.call::<_, ()>(setup_params)?;
-    
-    enter_loop(&lua, &globals)?;
-
-    Ok(())
-}
-
-// // // // // // // //
-fn enter_loop(_lua: &Lua, globals: &mlua::Table) -> mlua::Result<()> {
-    let call_lua_update: Function = globals.get("update")?;
-
-    for time in 1..5 {
-        let txt = call_lua_update.call::<_, String>(time)?;
-        println!("time = {} : {}", time, txt);
-    }
-
-    Ok(())
-}
-
-*/
