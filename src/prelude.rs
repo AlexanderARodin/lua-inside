@@ -19,13 +19,13 @@ impl LuaInside {
         let lua_print = self.lua.create_function( move |_, lua_args: Variadic<Value>| {
             internal_utils::lua_printer(&lua_args, printer );
             Ok(())
-        })?;
-        self.lua.globals().set("print", lua_print)?;
+        }).unwrap();
+        self.lua.globals().set("print", lua_print).unwrap();
         Ok(())
     }
 
     fn exec(&mut self, lua_code: &str) -> Result<()> {
-        self.lua.load( lua_code ).exec()?;
+        self.lua.load( lua_code ).exec().unwrap();
         Ok(())
     }
 }
